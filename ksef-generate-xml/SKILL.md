@@ -1,6 +1,6 @@
 ---
 name: ksef-generate-xml
-description: Use when generating FA(2) or FA(3) invoice XML for KSeF, including corrective invoices (KOR), or when validating XML structure against the official XSD schema.
+description: Use when generating FA(2) or FA(3) invoice XML for KSeF, including corrective invoices (KOR), metoda kasowa (cash accounting VAT), or when parsing FA(2) XML back into a data structure.
 ---
 
 # KSeF — Generowanie XML faktury (FA(2)/FA(3))
@@ -9,7 +9,7 @@ description: Use when generating FA(2) or FA(3) invoice XML for KSeF, including 
 
 KSeF accepts invoices in FA(2) and FA(3) XML schemas published by Ministerstwo Finansów. XML must validate against the official XSD before sending.
 
-Implementation: `/root/ksef/xml_generator.py` → `generate_fa_xml()`, `generate_kor_xml()`
+Implementation: `/root/ksef/xml_generator.py` → `generate_fa2_xml()`, `parse_fa2_xml()`
 Schemas (local): `/tmp/ksef-docs/faktury/schemy/FA/`
 
 ## Key Differences FA(2) vs FA(3)
@@ -56,6 +56,10 @@ Schemas (local): `/tmp/ksef-docs/faktury/schemy/FA/`
     <Rozliczenie>...</Rozliczenie>  <!-- tax summary -->
     <Platnosc>...</Platnosc>  <!-- payment terms -->
   </Fa>
+  <Adnotacje>
+    <P_16>1</P_16>   <!-- metoda kasowa: 1=tak, 2=nie -->
+    <!-- other Adnotacje elements -->
+  </Adnotacje>
 </Faktura>
 ```
 
@@ -68,6 +72,37 @@ Schemas (local): `/tmp/ksef-docs/faktury/schemy/FA/`
 4. Then remaining Fa elements
 
 XSD validation will fail if order is wrong.
+
+## Metoda Kasowa VAT (Cash Accounting — Small Taxpayers)
+
+Metoda kasowa is recorded in `<Adnotacje>/<P_16>`:
+
+```xml
+<Adnotacje>
+  <P_16>1</P_16>   <!-- 1 = metoda kasowa applies -->
+  <!-- or -->
+  <P_16>2</P_16>   <!-- 2 = standard method -->
+</Adnotacje>
+```
+
+- **`P_16 = 1`** → małý podatnik, metoda kasowa VAT
+- **`P_16 = 2`** → standard VAT accounting
+- PDF generator: adds "Metoda kasowa VAT (mały podatnik)" annotation automatically when `dane.metoda_kasowa = True`
+
+## parse_fa2_xml — Reading XML Back
+
+`parse_fa2_xml(xml_bytes)` reconstructs a `DaneFaktury` object from FA(2) XML. It reads `P_16` from `<Adnotacje>` to restore the `metoda_kasowa` flag:
+
+```python
+adnotacje = root.find(f"{{{NS}}}Adnotacje")
+metoda_kasowa = False
+if adnotacje is not None:
+    p16 = adnotacje.find(f"{{{NS}}}P_16")
+    if p16 is not None and p16.text and p16.text.strip() == "1":
+        metoda_kasowa = True
+```
+
+Note: KSeF returns a **UPO** (Urzędowe Potwierdzenie Odbioru), not the original FA(2) XML. When regenerating PDFs from KSeF data, use the locally saved FA(2) XML (stored in `/root/ksef/faktury/{numer}.xml`), not the UPO.
 
 ## VAT Rates (P_12 in FaWiersz)
 
@@ -103,3 +138,5 @@ Production invoices are legally binding documents.
 | Missing NrKSeFFaKorygowanej | Required for KOR — KSeF number of original invoice |
 | Wrong namespace | Must match schema exactly: `http://crd.gov.pl/wzor/2023/06/29/12648/` |
 | Not validating before send | Always validate against XSD — KSeF rejects invalid XML asynchronously |
+| Parsing UPO instead of FA(2) | UPO ≠ invoice XML — use local FA(2) file for PDF generation |
+| P_16 missing from parse_fa2_xml | Must read Adnotacje/P_16 to restore metoda_kasowa flag |

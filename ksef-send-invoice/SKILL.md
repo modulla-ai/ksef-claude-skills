@@ -1,6 +1,6 @@
 ---
 name: ksef-send-invoice
-description: Use when sending an invoice (FA, KOR, FA_RR) to KSeF API 2.0, opening an online session, encrypting XML, or waiting for a KSeF number after submission.
+description: Use when sending an invoice (FA, KOR, FA_RR) to KSeF API 2.0, opening an online session, encrypting XML, waiting for a KSeF number after submission, or handling duplicate invoice errors.
 ---
 
 # KSeF — Wysyłka faktury (sesja interaktywna, API 2.0)
@@ -67,6 +67,26 @@ encrypted = AES_CBC_encrypt(padded, key=aes_key, iv=aes_iv)
 # IV is sent at session open — NOT prepended to ciphertext
 ```
 
+## Error 440 — Duplikat faktury
+
+If the same invoice number is submitted again, KSeF returns error code **440** (Duplikat faktury). The response contains the **original KSeF number** from the first submission.
+
+```python
+# Response body when error 440:
+# {
+#   "status": { "code": 440, "description": "Duplikat faktury" },
+#   "extensions": { "originalKsefNumber": "1234567890-20260101-XXXX-YYYY-ZZ" }
+# }
+
+# Handling:
+if status_code == 440:
+    original_number = response["status"].get("extensions", {}).get("originalKsefNumber")
+    # Treat as success — return the original KSeF number
+    return original_number
+```
+
+This is idempotent: safe to retry — returns the same KSeF number.
+
 ## Common Mistakes
 
 | Mistake | Fix |
@@ -77,6 +97,7 @@ encrypted = AES_CBC_encrypt(padded, key=aes_key, iv=aes_iv)
 | Sending unencrypted XML | API 2.0 requires encryption — no plaintext option |
 | Not closing session | Close triggers UPO generation — always close when done |
 | Reusing AES key across sessions | Generate fresh key + IV for each new session |
+| Treating error 440 as failure | Duplikat means invoice already exists — extract originalKsefNumber and continue |
 
 ## Environments
 
